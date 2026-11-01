@@ -251,11 +251,15 @@ export const TimelineManager: React.FC = () => {
             {tasks.map((task) => {
               const isCritical = criticalTaskIds.has(task.id);
               const parentDependencies = tasks.filter((t) => (task.dependencies || []).includes(t.id));
+              const incompleteParents = parentDependencies.filter((p) => p.status !== 'completed');
+              const isBlocked = task.status !== 'completed' && incompleteParents.length > 0;
 
               return (
                 <div
                   key={task.id}
-                  className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-[var(--bg-card-subtle)]/50 px-2 rounded-xl transition-colors"
+                  className={`py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-2 rounded-xl transition-colors ${
+                    isBlocked ? 'bg-amber-50/40 dark:bg-amber-950/20' : 'hover:bg-[var(--bg-card-subtle)]/50'
+                  }`}
                 >
                   <div className="flex items-start gap-3 flex-1 min-w-0">
                     <button
@@ -289,6 +293,12 @@ export const TimelineManager: React.FC = () => {
                         {isCritical && (
                           <span className="text-[9px] uppercase font-extrabold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
                             Critical Path
+                          </span>
+                        )}
+                        {isBlocked && (
+                          <span className="text-[9px] uppercase font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300 flex items-center gap-1">
+                            <AlertTriangle className="w-2.5 h-2.5" />
+                            Blocked ({incompleteParents.length} dependency pending)
                           </span>
                         )}
                         <span

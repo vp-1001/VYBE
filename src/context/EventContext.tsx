@@ -67,6 +67,13 @@ export const EventProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   });
 
   const [activeEventId, setActiveEventId] = useState<string>(() => {
+    try {
+      const stored = localStorage.getItem(SETTINGS_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.activeEventId) return parsed.activeEventId;
+      }
+    } catch {}
     return events[0]?.id || DEMO_EVENT.id;
   });
 
@@ -105,14 +112,14 @@ export const EventProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   useEffect(() => {
     try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ currency, themeMode }));
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ currency, themeMode, activeEventId }));
       if (themeMode === 'dark') {
         document.documentElement.classList.add('dark');
       } else {
         document.documentElement.classList.remove('dark');
       }
     } catch {}
-  }, [currency, themeMode]);
+  }, [currency, themeMode, activeEventId]);
 
   const setCurrency = (c: Currency) => setCurrencyState(c);
   const setThemeMode = (mode: 'light' | 'dark') => setThemeModeState(mode);

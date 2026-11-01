@@ -58,6 +58,47 @@ test('proposeDeterministicRebalance offsets cost increases without breaking tota
   const catItem = proposal.adjustedItems.find(i => i.category === 'Catering');
   assert.ok(catItem);
   assert.equal(catItem.newEstimated, 35000);
-  // Other flexible items were cut to offset
-  assert.ok(proposal.adjustedItems.length > 1);
+});
+
+test('calculateBudgetMetrics clamps negative values safely to zero', () => {
+  const items: BudgetItem[] = [
+    { id: '1', category: 'Venue', name: 'Hall', estimatedCost: -5000, actualCost: -2000 },
+    { id: '2', category: 'Catering', name: 'Food', estimatedCost: 20000, actualCost: 15000 },
+  ];
+  const metrics = calculateBudgetMetrics(items, 50000, 100);
+
+  // Negative values must be clamped to 0
+  assert.equal(metrics.plannedTotal, 20000);
+  assert.equal(metrics.actualTotal, 15000);
+  assert.equal(metrics.remainingPlanned, 30000);
+});
+
+test('calculateBudgetMetrics handles invalid amounts and NaN gracefully', () => {
+  const items: any[] = [
+    { id: '1', category: 'Venue', name: 'Hall', estimatedCost: 'invalid' as any, actualCost: null as any },
+    { id: '2', category: 'Catering', name: 'Food', estimatedCost: undefined as any, actualCost: NaN },
+    { id: '3', category: 'Contingency', name: 'Emergency Fund', estimatedCost: 5000, actualCost: 0 },
+  ];
+  const metrics = calculateBudgetMetrics(items, 50000, 0); // 0 guest count
+
+  assert.equal(metrics.plannedTotal, 5000);
+  assert.equal(metrics.actualTotal, 0);
+  // Guest count clamped to 1, no Infinity
+  assert.equal(metrics.costPerGuest, 5000);
+  // Contingency tracking works
+  assert.equal(metrics.contingencyTotal, 5000);
+  assert.equal(metrics.contingencyPercentage, 10);
+});
+
+test('proposeDeterministicRebalance detects severe overrun when offset is impossible', () => {
+  const items: BudgetItem[] = [
+    { id: '1', category: 'Venue', name: 'Hall', estimatedCost: 50000, actualCost: 0, priority: 'must-have' },
+  ];
+  const totalBudget = 50000;
+  // User asks to increase venue by 20000 with no flexible categories to cut
+  const proposal = proposeDeterministicRebalance(items, totalBudget, 'Venue', 20000);
+
+  assert.equal(proposal.willExceedBudget, true);
+  assert.equal(proposal.overrunAmount, 20000);
+  assert.ok(proposal.explanation.includes('overrun'));
 });

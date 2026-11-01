@@ -48,6 +48,7 @@ export const AIEventWizard: React.FC<AIEventWizardProps> = ({ onClose, onPlanAcc
 
   // Generation state
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [regeneratingSection, setRegeneratingSection] = useState<string | null>(null);
   const [generatedPlan, setGeneratedPlan] = useState<any>(null);
   const [generationSource, setGenerationSource] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -108,18 +109,86 @@ export const AIEventWizard: React.FC<AIEventWizardProps> = ({ onClose, onPlanAcc
       const data = await response.json();
       if (data.success && data.plan) {
         setGeneratedPlan(data.plan);
-        setGenerationSource(data.source || 'gemini-3.8-flash');
+        const sourceLabel = data.isAIGenerated ? `Live Gemini (${data.source || 'gemini'})` : 'Offline Demonstration Blueprint';
+        setGenerationSource(sourceLabel);
         setEditableTitle(data.plan.title);
         setEditableConcept(data.plan.conceptDescription);
         setStep(5);
       } else {
-        throw new Error(data.warning || 'Failed to generate proposal');
+        throw new Error(data.error || data.warning || 'Failed to generate proposal');
       }
     } catch (err: any) {
       console.error('Plan generation failed:', err);
       setErrorMsg(err.message || 'Error communicating with generation engine.');
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleRegenerateSection = async (section: 'theme' | 'budget' | 'tasks' | 'activities') => {
+    setRegeneratingSection(section);
+    setErrorMsg(null);
+    try {
+      const response = await fetch('/api/ai/regenerate-section', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          section,
+          currentPlan: {
+            ...generatedPlan,
+            title: editableTitle || generatedPlan?.title,
+            conceptDescription: editableConcept || generatedPlan?.conceptDescription,
+            eventType,
+            budget,
+            totalBudget: budget,
+            guestCount,
+            location,
+            date,
+            vibes: selectedVibes,
+            currency,
+          },
+        }),
+      });
+
+      const data = await response.json();
+      if (data.success && data.data) {
+        setGeneratedPlan((prev: any) => ({
+          ...prev,
+          [section]: data.data,
+        }));
+      } else {
+        throw new Error(data.error || `Failed to regenerate ${section}`);
+      }
+    } catch (err: any) {
+      console.error(`Regenerate ${section} error:`, err);
+      setErrorMsg(err.message || `Failed to regenerate ${section}. User edits to other sections have been preserved.`);
+    } finally {
+      setRegeneratingSection(null);
+    }
+  };
+
+  const updateGeneratedBudgetItem = (index: number, newCost: number) => {
+    setGeneratedPlan((prev: any) => {
+      if (!prev?.budget) return prev;
+      const updatedBudget = [...prev.budget];
+      updatedBudget[index] = { ...updatedBudget[index], estimatedCost: Math.max(0, newCost) };
+      return { ...prev, budget: updatedBudget };
+    });
+  };
+
+  const updateGeneratedTaskItem = (index: number, newTitle: string) => {
+    setGeneratedPlan((prev: any) => {
+      if (!prev?.tasks) return prev;
+      const updatedTasks = [...prev.tasks];
+      updatedTasks[index] = { ...updatedTasks[index], title: newTitle };
+      return { ...prev, tasks: updatedTasks };
+    });
+  };
+
+  const handleRejectPlan = () => {
+    if (confirm('Discard this proposed event plan and return to configuration?')) {
+      setGeneratedPlan(null);
+      setStep(4);
     }
   };
 
@@ -465,52 +534,67 @@ export const AIEventWizard: React.FC<AIEventWizardProps> = ({ onClose, onPlanAcc
           {/* STEP 5: REVIEW GENERATED PLAN */}
           {step === 5 && generatedPlan && (
             <div className="space-y-5 max-h-[60vh] overflow-y-auto pr-1">
-              <div className="flex items-center justify-between pb-3 border-b border-[var(--border-main)]">
-                <div>
-                  <span className="text-[10px] uppercase font-bold text-violet-600 dark:text-violet-400">
-                    AI Proposed Plan ({generationSource})
-                  </span>
+              {/* Header with Title and Full Regenerate */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-[var(--border-main)] gap-2">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] uppercase font-bold text-violet-600 dark:text-violet-400 bg-violet-100 dark:bg-violet-900/40 px-2 py-0.5 rounded">
+                      {generationSource}
+                    </span>
+                    <span className="text-[10px] text-[var(--text-muted)]">Click text to edit</span>
+                  </div>
                   <input
                     type="text"
                     value={editableTitle}
                     onChange={(e) => setEditableTitle(e.target.value)}
-                    className="text-lg font-bold font-display text-[var(--text-main)] bg-transparent border-b border-dashed border-violet-300 focus:outline-none w-full"
+                    className="text-lg font-bold font-display text-[var(--text-main)] bg-transparent border-b border-dashed border-violet-300 focus:outline-none w-full mt-1"
+                    placeholder="Event Title"
                   />
                 </div>
                 <button
                   onClick={handleGeneratePlan}
                   disabled={isGenerating}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--bg-card-subtle)] border border-[var(--border-main)] hover:bg-violet-50 text-[var(--text-muted)] hover:text-violet-600 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--bg-card-subtle)] border border-[var(--border-main)] hover:bg-violet-50 text-[var(--text-muted)] hover:text-violet-600 transition-colors shrink-0 self-start sm:self-auto"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isGenerating ? 'animate-spin' : ''}`} />
-                  <span>Regenerate</span>
+                  <span>Regenerate Entire Plan</span>
                 </button>
               </div>
 
               {/* Concept Narrative (Editable) */}
               <div className="space-y-1">
                 <label className="text-[11px] font-semibold text-[var(--text-muted)]">
-                  Concept Description
+                  Concept Description (Editable)
                 </label>
                 <textarea
                   value={editableConcept}
                   onChange={(e) => setEditableConcept(e.target.value)}
-                  className="w-full p-2.5 text-xs rounded-xl bg-[var(--bg-card-subtle)] border border-[var(--border-main)] text-[var(--text-main)] leading-relaxed h-20"
+                  className="w-full p-2.5 text-xs rounded-xl bg-[var(--bg-card-subtle)] border border-[var(--border-main)] text-[var(--text-main)] leading-relaxed h-20 focus:outline-none focus:ring-1 focus:ring-violet-500"
                 />
               </div>
 
-              {/* Theme & Palette */}
+              {/* Section 1: Theme & Palette */}
               {generatedPlan.theme && (
                 <div className="p-3.5 rounded-xl bg-[var(--bg-card-subtle)] border border-[var(--border-main)] space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-[var(--text-main)]">
-                      Theme: {generatedPlan.theme.name}
-                    </span>
-                    <span className="text-[10px] text-violet-600 font-semibold">
-                      {generatedPlan.theme.vibe}
-                    </span>
+                    <div>
+                      <span className="text-xs font-bold text-[var(--text-main)]">
+                        Theme: {generatedPlan.theme.name}
+                      </span>
+                      <span className="text-[10px] text-violet-600 font-semibold ml-2">
+                        {generatedPlan.theme.vibe}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => handleRegenerateSection('theme')}
+                      disabled={regeneratingSection === 'theme'}
+                      className="flex items-center gap-1 text-[11px] font-semibold text-violet-600 hover:text-violet-700 bg-white dark:bg-zinc-800 px-2 py-0.5 rounded border border-violet-200 dark:border-violet-800"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${regeneratingSection === 'theme' ? 'animate-spin' : ''}`} />
+                      <span>Regenerate Theme</span>
+                    </button>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     {(generatedPlan.theme.colors || []).map((c: string, i: number) => (
                       <div key={i} className="flex items-center gap-1">
                         <span
@@ -521,6 +605,15 @@ export const AIEventWizard: React.FC<AIEventWizardProps> = ({ onClose, onPlanAcc
                       </div>
                     ))}
                   </div>
+                  {generatedPlan.theme.decorElements && generatedPlan.theme.decorElements.length > 0 && (
+                    <div className="pt-1 flex flex-wrap gap-1.5">
+                      {generatedPlan.theme.decorElements.map((el: string, idx: number) => (
+                        <span key={idx} className="text-[10px] px-2 py-0.5 rounded-full bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800">
+                          {el}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-[var(--text-muted)] pt-1">
                     <div>
                       <strong>Music Mood:</strong> {generatedPlan.theme.musicMood}
@@ -532,25 +625,49 @@ export const AIEventWizard: React.FC<AIEventWizardProps> = ({ onClose, onPlanAcc
                 </div>
               )}
 
-              {/* Budget Breakdown Preview */}
+              {/* Section 2: Budget Breakdown (Editable) */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-[var(--text-main)]">Preliminary Budget Allocation</h4>
-                  <span className="text-xs font-bold text-violet-600">
-                    Total: {formatCurrency(budget, currency)}
-                  </span>
+                  <div>
+                    <h4 className="text-xs font-bold text-[var(--text-main)]">
+                      Budget Allocation (Editable Costs)
+                    </h4>
+                    <span className="text-[10px] text-[var(--text-muted)]">
+                      Allocated: {formatCurrency(
+                        (generatedPlan.budget || []).reduce((s: number, b: any) => s + (Number(b.estimatedCost) || 0), 0),
+                        currency
+                      )} / Cap: {formatCurrency(budget, currency)}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => handleRegenerateSection('budget')}
+                    disabled={regeneratingSection === 'budget'}
+                    className="flex items-center gap-1 text-[11px] font-semibold text-violet-600 hover:text-violet-700 bg-white dark:bg-zinc-800 px-2 py-0.5 rounded border border-violet-200 dark:border-violet-800"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${regeneratingSection === 'budget' ? 'animate-spin' : ''}`} />
+                    <span>Regenerate Budget</span>
+                  </button>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                   {(generatedPlan.budget || []).map((b: any, i: number) => (
                     <div
                       key={i}
-                      className="p-2.5 rounded-lg bg-[var(--bg-card-subtle)] border border-[var(--border-main)]"
+                      className="p-2.5 rounded-lg bg-[var(--bg-card-subtle)] border border-[var(--border-main)] space-y-1"
                     >
-                      <div className="text-[10px] text-[var(--text-muted)] font-semibold uppercase">
-                        {b.category}
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-[var(--text-muted)] font-semibold uppercase">
+                          {b.category}
+                        </span>
+                        <span className="text-[9px] uppercase font-bold text-violet-500">{b.priority || 'must-have'}</span>
                       </div>
-                      <div className="text-xs font-bold text-[var(--text-main)]">
-                        {formatCurrency(b.estimatedCost, currency)}
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs font-bold text-[var(--text-muted)]">{currency === 'INR' ? '₹' : '$'}</span>
+                        <input
+                          type="number"
+                          value={b.estimatedCost}
+                          onChange={(e) => updateGeneratedBudgetItem(i, Number(e.target.value) || 0)}
+                          className="w-full text-xs font-bold text-[var(--text-main)] bg-white dark:bg-zinc-800 px-1.5 py-0.5 rounded border border-[var(--border-main)] focus:outline-none focus:ring-1 focus:ring-violet-500"
+                        />
                       </div>
                       <div className="text-[10px] text-[var(--text-muted)] truncate">{b.name}</div>
                     </div>
@@ -558,22 +675,40 @@ export const AIEventWizard: React.FC<AIEventWizardProps> = ({ onClose, onPlanAcc
                 </div>
               </div>
 
-              {/* Tasks & Milestones Preview */}
+              {/* Section 3: Tasks & Milestones Preview (Editable) */}
               <div className="space-y-2">
-                <h4 className="text-xs font-bold text-[var(--text-main)]">
-                  Key Timeline Tasks (DAG Scheduled)
-                </h4>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-bold text-[var(--text-main)]">
+                      Key Timeline Tasks (DAG Scheduled)
+                    </h4>
+                    <span className="text-[10px] text-[var(--text-muted)]">Deterministic dependency sequence</span>
+                  </div>
+                  <button
+                    onClick={() => handleRegenerateSection('tasks')}
+                    disabled={regeneratingSection === 'tasks'}
+                    className="flex items-center gap-1 text-[11px] font-semibold text-violet-600 hover:text-violet-700 bg-white dark:bg-zinc-800 px-2 py-0.5 rounded border border-violet-200 dark:border-violet-800"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${regeneratingSection === 'tasks' ? 'animate-spin' : ''}`} />
+                    <span>Regenerate Tasks</span>
+                  </button>
+                </div>
                 <div className="space-y-1.5">
-                  {(generatedPlan.tasks || []).slice(0, 4).map((t: any, i: number) => (
+                  {(generatedPlan.tasks || []).map((t: any, i: number) => (
                     <div
                       key={i}
-                      className="p-2 rounded-lg bg-[var(--bg-card-subtle)] border border-[var(--border-main)] flex items-center justify-between text-xs"
+                      className="p-2 rounded-lg bg-[var(--bg-card-subtle)] border border-[var(--border-main)] flex items-center justify-between text-xs gap-2"
                     >
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-violet-500" />
-                        <span className="font-medium text-[var(--text-main)]">{t.title}</span>
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-violet-500 shrink-0" />
+                        <input
+                          type="text"
+                          value={t.title}
+                          onChange={(e) => updateGeneratedTaskItem(i, e.target.value)}
+                          className="w-full text-xs font-medium text-[var(--text-main)] bg-transparent border-b border-transparent hover:border-[var(--border-main)] focus:border-violet-500 focus:outline-none"
+                        />
                       </div>
-                      <span className="text-[10px] text-[var(--text-muted)] font-semibold">
+                      <span className="text-[10px] text-[var(--text-muted)] font-semibold shrink-0">
                         Due {t.dueDate}
                       </span>
                     </div>
@@ -581,9 +716,51 @@ export const AIEventWizard: React.FC<AIEventWizardProps> = ({ onClose, onPlanAcc
                 </div>
               </div>
 
+              {/* Section 4: Signature Activities */}
+              {generatedPlan.activities && generatedPlan.activities.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-[var(--text-main)]">Signature Event Moments</h4>
+                    <button
+                      onClick={() => handleRegenerateSection('activities')}
+                      disabled={regeneratingSection === 'activities'}
+                      className="flex items-center gap-1 text-[11px] font-semibold text-violet-600 hover:text-violet-700 bg-white dark:bg-zinc-800 px-2 py-0.5 rounded border border-violet-200 dark:border-violet-800"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${regeneratingSection === 'activities' ? 'animate-spin' : ''}`} />
+                      <span>Regenerate Activities</span>
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {generatedPlan.activities.map((act: string, idx: number) => (
+                      <span key={idx} className="text-[11px] px-2.5 py-1 rounded-lg bg-pink-50 dark:bg-pink-950/40 text-pink-700 dark:text-pink-300 border border-pink-200 dark:border-pink-800 font-medium">
+                        ✦ {act}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Section 5: Risks & Contingencies */}
+              {generatedPlan.risks && generatedPlan.risks.length > 0 && (
+                <div className="p-3 rounded-xl bg-[var(--bg-card-subtle)] border border-[var(--border-main)] space-y-2 text-xs">
+                  <h4 className="font-bold text-[var(--text-main)] text-xs">Risks & Contingency Mitigation</h4>
+                  <div className="space-y-1.5">
+                    {generatedPlan.risks.map((r: any, idx: number) => (
+                      <div key={idx} className="p-2 rounded bg-white dark:bg-zinc-800 border border-[var(--border-main)] space-y-0.5">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <strong className="text-[var(--text-main)]">{r.risk}</strong>
+                          <span className="text-[9px] uppercase font-bold text-amber-600">Severity: {r.severity}</span>
+                        </div>
+                        <p className="text-[10px] text-[var(--text-muted)]">{r.contingencyPlan}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Important Disclaimers */}
               <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-900 dark:text-amber-200">
-                <strong>Notice:</strong> This plan is a proposed creative and budgetary blueprint. No vendors or venues have been booked. Once accepted, you can manage vendors, assign real quotes, and coordinate execution in your workspace.
+                <strong>Notice:</strong> This plan is an editable proposed blueprint. All sections above can be regenerated individually without losing changes to other sections. Once accepted, all items save to your workspace.
               </div>
             </div>
           )}
@@ -632,20 +809,28 @@ export const AIEventWizard: React.FC<AIEventWizardProps> = ({ onClose, onPlanAcc
           )}
 
           {step === 5 && (
-            <div className="flex items-center gap-2 ml-auto">
+            <div className="flex items-center justify-between w-full">
               <button
-                onClick={() => setStep(4)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-[var(--bg-card)] border border-[var(--border-main)] text-[var(--text-main)]"
+                onClick={handleRejectPlan}
+                className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border border-rose-200 dark:border-rose-800 hover:bg-rose-100 transition-colors"
               >
-                Back to Config
+                Reject / Discard Proposal
               </button>
-              <button
-                onClick={handleAcceptPlan}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/30"
-              >
-                <Check className="w-4 h-4" />
-                <span>Accept Plan & Open Workspace</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setStep(4)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-[var(--bg-card)] border border-[var(--border-main)] text-[var(--text-main)] hover:bg-[var(--bg-card-subtle)]"
+                >
+                  Back to Config
+                </button>
+                <button
+                  onClick={handleAcceptPlan}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/30 transition-all hover:scale-[1.01]"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Accept Plan & Open Workspace</span>
+                </button>
+              </div>
             </div>
           )}
         </div>

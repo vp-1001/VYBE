@@ -11,19 +11,21 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = process.env.PORT || 3000;
+const isProduction = process.env.NODE_ENV === 'production' || process.argv.includes('--production');
 
 app.use(express.json({ limit: '10mb' }));
 
 // Initialize GoogleGenAI SDK server-side
 const apiKey = process.env.GEMINI_API_KEY;
+const configuredModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 let aiClient: GoogleGenAI | null = null;
 
-if (apiKey && apiKey !== 'MY_GEMINI_API_KEY') {
+if (apiKey && apiKey !== 'MY_GEMINI_API_KEY' && apiKey.trim() !== '') {
   aiClient = new GoogleGenAI({
-    apiKey,
+    apiKey: apiKey.trim(),
     httpOptions: {
       headers: {
-        'User-Agent': 'aistudio-build',
+        'User-Agent': 'vybe-ai-event-architect',
       },
     },
   });
@@ -34,10 +36,54 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     hasGeminiKey: !!aiClient,
-    model: 'gemini-3.8-flash',
+    model: configuredModel,
+    isProduction,
     timestamp: new Date().toISOString(),
   });
 });
+
+/**
+ * Resilient caller that queries Gemini with automatic model fallback
+ * (e.g. configuredModel -> gemini-2.5-flash -> gemini-1.5-flash -> gemini-3.8-flash)
+ * Throws on genuine auth, network, or quota failures.
+ */
+async function generateWithGemini(prompt: string, preferredModel = configuredModel): Promise<string> {
+  if (!aiClient) {
+    throw new Error('No Gemini API key configured.');
+  }
+
+  const candidateModels = [preferredModel, 'gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-3.8-flash'];
+  const uniqueModels = Array.from(new Set(candidateModels));
+  let lastError: any = null;
+
+  for (const model of uniqueModels) {
+    try {
+      const response = await aiClient.models.generateContent({
+        model,
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+        },
+      });
+      if (response && response.text && response.text.trim().length > 0) {
+        return response.text;
+      }
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`Gemini generation with model ${model} failed: ${err.message}`);
+      if (
+        err.status === 401 ||
+        err.status === 403 ||
+        err.message?.includes('API_KEY_INVALID') ||
+        err.message?.includes('quota')
+      ) {
+        throw err;
+      }
+    }
+  }
+
+  throw lastError || new Error('Empty response received from Gemini API');
+}
 
 // Fallback intelligent generator for resilient offline / no-key demo execution
 function generateFallbackPlan(body: any) {
@@ -124,11 +170,12 @@ app.post('/api/ai/generate-plan', async (req, res) => {
     const { eventType, vision, date, location, guestCount, budget, currency, vibes, culturalPreferences, indoorOutdoor, specialRequirements } = req.body;
 
     if (!aiClient) {
-      console.log('No Gemini API key detected, using intelligent deterministic planner');
+      console.log('No Gemini API key detected, using offline demonstration planner');
       return res.json({
         success: true,
         isAIGenerated: false,
-        source: 'local-engine',
+        source: 'offline-demo',
+        offlineNotice: 'Operating in Offline Demonstration Mode. Configure GEMINI_API_KEY in server environment to enable live AI generation.',
         plan: generateFallbackPlan(req.body),
       });
     }
@@ -209,15 +256,7 @@ Return a single JSON object conforming strictly to this format:
 DO NOT include markdown wrappers or backticks if possible, just valid JSON. Sum of estimatedCost in budget MUST NEVER exceed ${budget}.
 `;
 
-    const response = await aiClient.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-      },
-    });
-
-    const text = response.text || '';
+    const text = await generateWithGemini(prompt);
     let parsedPlan: any;
     try {
       parsedPlan = JSON.parse(text);
@@ -247,17 +286,174 @@ DO NOT include markdown wrappers or backticks if possible, just valid JSON. Sum 
     return res.json({
       success: true,
       isAIGenerated: true,
-      source: 'gemini-3.8-flash',
+      source: 'gemini-live',
       plan: parsedPlan,
     });
   } catch (error: any) {
-    console.error('Gemini plan generation error, falling back:', error.message);
+    console.error('Gemini plan generation error:', error.message);
+    return res.status(500).json({
+      success: false,
+      isAIGenerated: false,
+      source: 'gemini-error',
+      error: `Gemini Plan Generation Failed: ${error.message || 'Unknown API error'}. Verify your GEMINI_API_KEY and server connectivity.`,
+    });
+  }
+});
+
+// 1b. Regenerate Individual Section (without replacing the entire plan)
+app.post('/api/ai/regenerate-section', async (req, res) => {
+  try {
+    const { section, currentPlan, userGuidance } = req.body;
+    if (!section) {
+      return res.status(400).json({ error: 'Section parameter is required.' });
+    }
+
+    if (!aiClient) {
+      const fallback = generateFallbackPlan(currentPlan || {});
+      let sectionData: any;
+      if (section === 'theme') sectionData = fallback.theme;
+      else if (section === 'budget') sectionData = fallback.budget;
+      else if (section === 'tasks') sectionData = fallback.tasks;
+      else if (section === 'schedule') sectionData = fallback.schedule;
+      else if (section === 'activities') sectionData = fallback.activities;
+      else sectionData = (fallback as Record<string, any>)[section];
+
+      return res.json({
+        success: true,
+        isAIGenerated: false,
+        source: 'offline-demo',
+        offlineNotice: 'Operating in Offline Demonstration Mode.',
+        section,
+        data: sectionData,
+      });
+    }
+
+    const eventType = currentPlan?.eventType || 'college';
+    const totalBudget = Number(currentPlan?.totalBudget || currentPlan?.budget) || 80000;
+    const currency = currentPlan?.currency || 'INR';
+    const guestCount = Number(currentPlan?.guestCount) || 200;
+    const location = currentPlan?.location || 'Kolkata';
+
+    let prompt = '';
+    if (section === 'theme') {
+      prompt = `
+You are the master AI Event Designer for VYBE AI.
+Generate a distinctive, creative event theme for an event with type "${eventType}", location "${location}", vibes "${(currentPlan?.vibes || []).join(', ')}", and guidance: "${userGuidance || 'Fresh elegant aesthetic'}".
+Return JSON strictly conforming to:
+{
+  "theme": {
+    "name": string,
+    "vibe": string,
+    "tagline": string,
+    "description": string,
+    "colors": string[] (array of exactly 5 hex colors),
+    "decorElements": string[] (4 distinct decor items),
+    "musicMood": string,
+    "lightingStyle": string,
+    "dressCodePrompt": string
+  }
+}
+`;
+    } else if (section === 'budget') {
+      prompt = `
+You are the master AI Budget Architect for VYBE AI.
+Generate an itemized, realistic budget allocation strictly under ${totalBudget} ${currency} for a ${eventType} with ${guestCount} guests in ${location}. User guidance: "${userGuidance || 'Balanced realistic breakdown'}".
+Return JSON strictly conforming to:
+{
+  "budget": [
+    {
+      "id": string (unique e.g. "b1"),
+      "category": string (Venue, Catering, Decorations, Photography, Entertainment, Contingency),
+      "name": string,
+      "estimatedCost": number (ensure total sum matches or is strictly under ${totalBudget}),
+      "actualCost": 0,
+      "priority": "must-have" | "nice-to-have" | "optional"
+    }
+  ]
+}
+`;
+    } else if (section === 'tasks') {
+      prompt = `
+You are the master AI Event Scheduler for VYBE AI.
+Generate 6-8 milestone tasks with valid DAG dependencies (array of predecessor task IDs, NO circular dependencies) for event date "${currentPlan?.date || '2026-11-28'}". Guidance: "${userGuidance || 'Detailed planning milestones'}".
+Return JSON strictly conforming to:
+{
+  "tasks": [
+    {
+      "id": string (e.g. "t1"),
+      "title": string,
+      "category": string,
+      "dueDate": string (YYYY-MM-DD),
+      "priority": "low" | "medium" | "high" | "urgent",
+      "status": "pending",
+      "dependencies": string[],
+      "estimatedDurationHours": number
+    }
+  ]
+}
+`;
+    } else if (section === 'schedule') {
+      prompt = `
+You are the master AI Event Day Director for VYBE AI.
+Generate a chronological run-of-show schedule for event day. Event type: "${eventType}". Guidance: "${userGuidance || 'Comprehensive day-of run-of-show'}".
+Return JSON strictly conforming to:
+{
+  "schedule": [
+    {
+      "id": string (e.g. "s1"),
+      "startTime": string ("HH:MM"),
+      "endTime": string ("HH:MM"),
+      "activity": string,
+      "location": string,
+      "status": "scheduled"
+    }
+  ]
+}
+`;
+    } else {
+      prompt = `
+Generate 4-6 signature event moments / interactive activities for a ${eventType} in ${location}. Guidance: "${userGuidance || 'Unique memorable moments'}".
+Return JSON strictly conforming to:
+{
+  "activities": string[]
+}
+`;
+    }
+
+    const text = await generateWithGemini(prompt);
+    let parsed: any;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      const match = text.match(/\{[\s\S]*\}/);
+      if (match) parsed = JSON.parse(match[0]);
+      else throw new Error('Could not parse JSON response from Gemini');
+    }
+
+    let sectionData = parsed[section] || parsed.theme || parsed.budget || parsed.tasks || parsed.schedule || parsed.activities || parsed;
+
+    if (section === 'budget' && Array.isArray(sectionData)) {
+      const sum = sectionData.reduce((s: number, b: any) => s + (Number(b.estimatedCost) || 0), 0);
+      if (sum > totalBudget) {
+        const factor = totalBudget / sum;
+        sectionData.forEach((b: any) => {
+          b.estimatedCost = Math.round((Number(b.estimatedCost) || 0) * factor);
+        });
+      }
+    }
+
     return res.json({
       success: true,
-      isAIGenerated: false,
-      source: 'local-fallback',
-      plan: generateFallbackPlan(req.body),
-      warning: `Gemini API request note: ${error.message}. Loaded calibrated blueprint fallback.`,
+      isAIGenerated: true,
+      source: 'gemini-live',
+      section,
+      data: sectionData,
+    });
+  } catch (err: any) {
+    console.error('Section regeneration error:', err);
+    return res.status(500).json({
+      success: false,
+      error: `Section regeneration failed: ${err.message}`,
     });
   }
 });
@@ -314,13 +510,8 @@ Return JSON strictly conforming to this schema:
 }
 `;
 
-        const response = await aiClient.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: prompt,
-          config: { responseMimeType: 'application/json' },
-        });
-
-        const parsed = JSON.parse(response.text || '{}');
+        const text = await generateWithGemini(prompt);
+        const parsed = JSON.parse(text || '{}');
         return res.json({
           success: true,
           reply: parsed.replyText || "I've reviewed your event parameters.",
@@ -435,12 +626,8 @@ Return JSON:
   "keyHighlights": string[]
 }
 `;
-        const response = await aiClient.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: prompt,
-          config: { responseMimeType: 'application/json' },
-        });
-        return res.json(JSON.parse(response.text || '{}'));
+        const text = await generateWithGemini(prompt);
+        return res.json(JSON.parse(text || '{}'));
       } catch (geminiErr: any) {
         console.warn('Gemini vendor comparison error, falling back:', geminiErr.message);
       }
@@ -494,12 +681,8 @@ Return JSON conforming strictly to:
   }
 }
 `;
-        const response = await aiClient.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: prompt,
-          config: { responseMimeType: 'application/json' },
-        });
-        const parsed = JSON.parse(response.text || '{}');
+        const text = await generateWithGemini(prompt);
+        const parsed = JSON.parse(text || '{}');
         if (parsed.theme) {
           return res.json({ success: true, theme: parsed.theme });
         }
@@ -550,7 +733,7 @@ Return JSON conforming strictly to:
 
 // Mount Vite middleware in development or serve static in production
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
+  if (!isProduction) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -565,7 +748,7 @@ async function startServer() {
   }
 
   app.listen(port, () => {
-    console.log(`> VYBE AI Server running on port ${port} (Node ${process.version})`);
+    console.log(`> VYBE AI Server running on port ${port} (Node ${process.version}) [Production: ${isProduction}]`);
   });
 }
 

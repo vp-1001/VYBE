@@ -8,6 +8,8 @@ export interface BudgetMetrics {
   remainingActual: number;
   costPerGuest: number;
   utilizationRate: number; // 0 to 100+
+  contingencyTotal: number;
+  contingencyPercentage: number;
   isOverrun: boolean;
   overrunAmount: number;
   categoryBreakdown: {
@@ -47,23 +49,35 @@ export function calculateBudgetMetrics(
   totalBudget: number,
   guestCount: number
 ): BudgetMetrics {
-  const plannedTotal = items.reduce((sum, item) => sum + (Number(item.estimatedCost) || 0), 0);
-  const actualTotal = items.reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
-  const remainingPlanned = totalBudget - plannedTotal;
-  const remainingActual = totalBudget - actualTotal;
-  const safeGuestCount = guestCount > 0 ? guestCount : 1;
+  const safeTotalBudget = Math.max(0, Number(totalBudget) || 0);
+  const plannedTotal = items.reduce((sum, item) => sum + Math.max(0, Number(item?.estimatedCost) || 0), 0);
+  const actualTotal = items.reduce((sum, item) => sum + Math.max(0, Number(item?.actualCost) || 0), 0);
+  const remainingPlanned = safeTotalBudget - plannedTotal;
+  const remainingActual = safeTotalBudget - actualTotal;
+  const safeGuestCount = Math.max(1, Number(guestCount) || 1);
   const costPerGuest = Math.round(plannedTotal / safeGuestCount);
-  const utilizationRate = totalBudget > 0 ? (plannedTotal / totalBudget) * 100 : 0;
-  const isOverrun = plannedTotal > totalBudget;
-  const overrunAmount = isOverrun ? plannedTotal - totalBudget : 0;
+  const utilizationRate = safeTotalBudget > 0 ? (plannedTotal / safeTotalBudget) * 100 : 0;
+  const isOverrun = plannedTotal > safeTotalBudget;
+  const overrunAmount = isOverrun ? plannedTotal - safeTotalBudget : 0;
+
+  // Contingency calculations
+  const contingencyItems = items.filter(
+    (i) => (i?.category || '').toLowerCase() === 'contingency'
+  );
+  const contingencyTotal = contingencyItems.reduce(
+    (s, i) => s + Math.max(0, Number(i?.estimatedCost) || 0),
+    0
+  );
+  const contingencyPercentage =
+    safeTotalBudget > 0 ? (contingencyTotal / safeTotalBudget) * 100 : 0;
 
   // Group by category
   const categoryMap = new Map<string, { planned: number; actual: number; count: number }>();
   for (const item of items) {
-    const cat = item.category || 'General';
+    const cat = item?.category || 'General';
     const existing = categoryMap.get(cat) || { planned: 0, actual: 0, count: 0 };
-    existing.planned += Number(item.estimatedCost) || 0;
-    existing.actual += Number(item.actualCost) || 0;
+    existing.planned += Math.max(0, Number(item?.estimatedCost) || 0);
+    existing.actual += Math.max(0, Number(item?.actualCost) || 0);
     existing.count += 1;
     categoryMap.set(cat, existing);
   }
@@ -72,7 +86,7 @@ export function calculateBudgetMetrics(
     category,
     planned: val.planned,
     actual: val.actual,
-    percentageOfBudget: totalBudget > 0 ? (val.planned / totalBudget) * 100 : 0,
+    percentageOfBudget: safeTotalBudget > 0 ? (val.planned / safeTotalBudget) * 100 : 0,
     itemCount: val.count,
   }));
 
@@ -80,13 +94,15 @@ export function calculateBudgetMetrics(
   categoryBreakdown.sort((a, b) => b.planned - a.planned);
 
   return {
-    totalBudget,
+    totalBudget: safeTotalBudget,
     plannedTotal,
     actualTotal,
     remainingPlanned,
     remainingActual,
     costPerGuest,
     utilizationRate,
+    contingencyTotal,
+    contingencyPercentage,
     isOverrun,
     overrunAmount,
     categoryBreakdown,
