@@ -210,7 +210,7 @@ export const BudgetStudio: React.FC = () => {
       </div>
 
       {/* KPI Stats Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="p-3.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border-main)] shadow-sm space-y-1">
           <span className="text-[10px] uppercase font-bold text-[var(--text-muted)]">Total Budget</span>
           <div className="text-lg font-bold font-display text-[var(--text-main)]">
@@ -245,7 +245,17 @@ export const BudgetStudio: React.FC = () => {
           <span className="text-[10px] text-[var(--text-muted)]">Buffer Available</span>
         </div>
 
-        <div className="p-3.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border-main)] shadow-sm space-y-1 col-span-2 lg:col-span-1">
+        <div className="p-3.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border-main)] shadow-sm space-y-1">
+          <span className="text-[10px] uppercase font-bold text-[var(--text-muted)]">Contingency Reserve</span>
+          <div className="text-lg font-bold font-display text-indigo-600">
+            {formatCurrency(metrics.contingencyTotal, currency)}
+          </div>
+          <span className="text-[10px] text-[var(--text-muted)]">
+            {Math.round(metrics.contingencyPercentage)}% Risk Cushion
+          </span>
+        </div>
+
+        <div className="p-3.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border-main)] shadow-sm space-y-1">
           <span className="text-[10px] uppercase font-bold text-[var(--text-muted)]">Cost Per Guest</span>
           <div className="text-lg font-bold font-display text-amber-600">
             {formatCurrency(metrics.costPerGuest, currency)}

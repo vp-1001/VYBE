@@ -17,6 +17,14 @@ import { Currency } from '../../types/event';
 
 export const SettingsView: React.FC = () => {
   const { currency, setCurrency, themeMode, setThemeMode, resetToDemo, activeEvent } = useEvent();
+  const [healthStatus, setHealthStatus] = React.useState<{ hasGeminiKey: boolean; model: string } | null>(null);
+
+  React.useEffect(() => {
+    fetch('/api/health')
+      .then((res) => res.json())
+      .then((data) => setHealthStatus(data))
+      .catch(() => setHealthStatus(null));
+  }, []);
 
   const handleExportJSON = () => {
     if (!activeEvent) return;
@@ -43,6 +51,26 @@ export const SettingsView: React.FC = () => {
         <p className="text-xs sm:text-sm text-[var(--text-muted)]">
           Configure financial currency standards, aesthetic dark mode, and data persistence controls.
         </p>
+      </div>
+
+      {/* AI Connection Status Card */}
+      <div className="p-4 rounded-2xl bg-[var(--bg-card)] border border-[var(--border-main)] shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className={`w-3 h-3 rounded-full shrink-0 ${healthStatus?.hasGeminiKey ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+          <div>
+            <div className="text-xs font-bold text-[var(--text-main)] flex items-center gap-2">
+              <span>AI Engine: {healthStatus?.hasGeminiKey ? `Live Google Gemini (${healthStatus.model})` : 'Calibrated Event Architecture Engine'}</span>
+              <span className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded ${healthStatus?.hasGeminiKey ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'}`}>
+                {healthStatus?.hasGeminiKey ? 'API Connected' : 'Demo Resilient Mode'}
+              </span>
+            </div>
+            <div className="text-[11px] text-[var(--text-muted)]">
+              {healthStatus?.hasGeminiKey
+                ? 'Server is connected to Google GenAI SDK. Plans and proposals generate live.'
+                : 'Using calibrated deterministic planning blueprint. Configure GEMINI_API_KEY in AI Studio Secrets to unlock live generation.'}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Preferences Section */}

@@ -2,5 +2,7 @@
   "name": "VYBE AI — Event Planning Platform",
   "description": "Transform natural language visions into structured, budget-aware event plans with AI scheduling, visual themes, and command center.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
