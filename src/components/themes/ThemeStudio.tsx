@@ -13,6 +13,7 @@ import {
 import { useEvent } from '../../context/EventContext';
 import { INSPIRATION_THEMES } from '../../data/inspirationThemes';
 import { EventTheme } from '../../types/event';
+import { apiUrl } from '../../utils/api';
 
 export const ThemeStudio: React.FC = () => {
   const { activeEvent, setEventTheme } = useEvent();
@@ -63,7 +64,7 @@ export const ThemeStudio: React.FC = () => {
   const handleGenerateAlternativeTheme = async () => {
     setIsGeneratingTheme(true);
     try {
-      const response = await fetch('/api/ai/suggest-themes', {
+      const response = await fetch(apiUrl('/api/ai/suggest-themes'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

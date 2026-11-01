@@ -24,6 +24,7 @@ import { useEvent } from '../../context/EventContext';
 import { EventType, EventPlan } from '../../types/event';
 import { formatCurrency } from '../../utils/budgetLogic';
 import { validateAndRepairEventPlan } from '../../utils/validation';
+import { apiUrl } from '../../utils/api';
 
 interface AIEventWizardProps {
   onClose: () => void;
@@ -88,7 +89,7 @@ export const AIEventWizard: React.FC<AIEventWizardProps> = ({ onClose, onPlanAcc
     setErrorMsg(null);
 
     try {
-      const response = await fetch('/api/ai/generate-plan', {
+      const response = await fetch(apiUrl('/api/ai/generate-plan'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -129,7 +130,7 @@ export const AIEventWizard: React.FC<AIEventWizardProps> = ({ onClose, onPlanAcc
     setRegeneratingSection(section);
     setErrorMsg(null);
     try {
-      const response = await fetch('/api/ai/regenerate-section', {
+      const response = await fetch(apiUrl('/api/ai/regenerate-section'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

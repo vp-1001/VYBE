@@ -19,6 +19,7 @@ import {
 import { useEvent } from '../../context/EventContext';
 import { Vendor, VendorQuotation } from '../../types/event';
 import { formatCurrency } from '../../utils/budgetLogic';
+import { apiUrl } from '../../utils/api';
 
 export const VendorComparison: React.FC = () => {
   const { activeEvent, addVendor, updateVendor, deleteVendor, addVendorQuotation, currency } = useEvent();
@@ -147,7 +148,7 @@ export const VendorComparison: React.FC = () => {
   const handleCompareWithAI = async () => {
     setIsComparing(true);
     try {
-      const response = await fetch('/api/ai/compare-vendors', {
+      const response = await fetch(apiUrl('/api/ai/compare-vendors'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

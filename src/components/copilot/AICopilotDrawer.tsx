@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useEvent } from '../../context/EventContext';
 import { AIChangeProposal } from '../../types/event';
+import { apiUrl } from '../../utils/api';
 
 interface AICopilotDrawerProps {
   isOpen: boolean;
@@ -68,7 +69,7 @@ export const AICopilotDrawer: React.FC<AICopilotDrawerProps> = ({ isOpen, onClos
     setIsSending(true);
 
     try {
-      const response = await fetch('/api/ai/copilot', {
+      const response = await fetch(apiUrl('/api/ai/copilot'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
